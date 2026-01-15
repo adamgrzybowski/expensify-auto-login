@@ -117,7 +117,8 @@ export class EmailMonitor {
    */
   async waitForCode(
     fromEmail: string = "noreply@expensify.com",
-    maxWaitTime: number = 60000
+    maxWaitTime: number = 60000,
+    sinceTime?: Date
   ): Promise<string> {
     if (!this.connected) {
       await this.connect();
@@ -134,7 +135,7 @@ export class EmailMonitor {
 
         try {
           await this.openInbox();
-          const code = await this.findCode(fromEmail);
+          const code = await this.findCode(fromEmail, sinceTime);
           if (code) {
             console.log(`📧 Code found in email: ${code}`);
             resolve(code);
@@ -165,10 +166,17 @@ export class EmailMonitor {
     });
   }
 
-  private async findCode(fromEmail: string): Promise<string | null> {
+  private async findCode(
+    fromEmail: string,
+    sinceTime?: Date
+  ): Promise<string | null> {
     return new Promise((resolve, reject) => {
       // Search for unread emails from Expensify
-      console.log(`\n🔍 Searching for emails from: ${fromEmail}`);
+      console.log(
+        `\n🔍 Searching for emails from: ${fromEmail}${
+          sinceTime ? ` (after ${sinceTime.toISOString()})` : ""
+        }`
+      );
       this.imap.search(
         ["UNSEEN", ["FROM", fromEmail], ["SUBJECT", "Expensify magic code"]],
         (err, results) => {
@@ -184,66 +192,170 @@ export class EmailMonitor {
             return;
           }
 
-          // Get the most recent email
-          const fetch = this.imap.fetch(results.slice(-1), { bodies: "" });
+          // Fetch all matching emails to find one with valid timestamp
+          const fetch = this.imap.fetch(results, { bodies: "" });
           let resolved = false;
+          const validEmails: { uid: number; code: string; date: Date }[] = [];
+          let pendingCount = results.length;
 
-          fetch.on("message", (msg) => {
+          fetch.on("message", (msg, seqno) => {
+            // Wait for attributes to get UID, then process body
+            const uidPromise = new Promise<number | undefined>((resolveUid) => {
+              msg.once("attributes", (attrs) => {
+                resolveUid(attrs.uid);
+              });
+              
+              // Fallback: if attributes never fires, resolve with undefined after timeout
+              setTimeout(() => resolveUid(undefined), 1000);
+            });
+            
             msg.on("body", async (stream) => {
+              // Wait for UID from attributes event
+              const uid = await uidPromise;
+              
+              // If no UID, skip this message
+              if (!uid || typeof uid !== 'number') {
+                console.warn(`⚠️  Could not get UID for message ${seqno}, skipping`);
+                pendingCount--;
+                if (pendingCount === 0 && !resolved) {
+                  if (validEmails.length > 0) {
+                    validEmails.sort(
+                      (a, b) => b.date.getTime() - a.date.getTime()
+                    );
+                    const best = validEmails[0];
+                    if (best.uid) {
+                      this.imap.addFlags(best.uid, "\\Seen", (flagErr) => {
+                        if (flagErr)
+                          console.warn(
+                            "Warning: Could not mark email as read",
+                            flagErr
+                          );
+                      });
+                    }
+                    resolved = true;
+                    resolve(best.code);
+                  } else {
+                    resolved = true;
+                    resolve(null);
+                  }
+                }
+                return;
+              }
+              
               try {
                 const parsed = await simpleParser(stream);
                 const subject = parsed.subject || "";
-                console.log(`📧 Processing email: "${subject}"`);
+                const emailDate = parsed.date;
+                console.log(
+                  `📧 Processing email: "${subject}" (date: ${
+                    emailDate?.toISOString() || "unknown"
+                  })`
+                );
+
+                // Check if email was sent after sinceTime
+                if (sinceTime && emailDate && emailDate < sinceTime) {
+                  console.log(`⏭️  Skipping old email (before login started)`);
+                  pendingCount--;
+                  if (pendingCount === 0 && !resolved) {
+                    // All emails processed, return the most recent valid one
+                    if (validEmails.length > 0) {
+                      validEmails.sort(
+                        (a, b) => b.date.getTime() - a.date.getTime()
+                      );
+                      const best = validEmails[0];
+                      // Mark email as read
+                      if (best.uid) {
+                        this.imap.addFlags(best.uid, "\\Seen", (flagErr) => {
+                          if (flagErr)
+                            console.warn(
+                              "Warning: Could not mark email as read",
+                              flagErr
+                            );
+                        });
+                      }
+                      resolved = true;
+                      resolve(best.code);
+                    } else {
+                      resolved = true;
+                      resolve(null);
+                    }
+                  }
+                  return;
+                }
 
                 // Extract code from subject line: "Expensify magic code: 147826"
                 const codeMatch = subject.match(
                   /Expensify magic code:\s*(\d+)/
                 );
 
+                let code: string | null = null;
                 if (codeMatch && codeMatch[1]) {
-                  const code = codeMatch[1];
+                  code = codeMatch[1];
                   console.log(`✅ Extracted code: ${code}`);
-
-                  // Mark email as read
-                  this.imap.addFlags(
-                    results[results.length - 1],
-                    "\\Seen",
-                    (flagErr) => {
-                      if (flagErr)
-                        console.warn(
-                          "Warning: Could not mark email as read",
-                          flagErr
-                        );
-                    }
-                  );
-
-                  if (!resolved) {
-                    resolved = true;
-                    resolve(code);
-                  }
                 } else {
                   // Fallback: try to extract from email body
                   const text = parsed.text || parsed.html || "";
                   const bodyCodeMatch = text.match(/(\d{6})/); // 6-digit code
                   if (bodyCodeMatch && bodyCodeMatch[1]) {
-                    console.log(`✅ Extracted code from body: ${bodyCodeMatch[1]}`);
-                    if (!resolved) {
-                      resolved = true;
-                      resolve(bodyCodeMatch[1]);
+                    code = bodyCodeMatch[1];
+                    console.log(`✅ Extracted code from body: ${code}`);
+                  }
+                }
+
+                if (code && emailDate && uid) {
+                  validEmails.push({ uid, code, date: emailDate });
+                }
+
+                pendingCount--;
+                if (pendingCount === 0 && !resolved) {
+                  // All emails processed, return the most recent valid one
+                  if (validEmails.length > 0) {
+                    validEmails.sort(
+                      (a, b) => b.date.getTime() - a.date.getTime()
+                    );
+                    const best = validEmails[0];
+                    // Mark email as read
+                    if (best.uid) {
+                      this.imap.addFlags(best.uid, "\\Seen", (flagErr) => {
+                        if (flagErr)
+                          console.warn(
+                            "Warning: Could not mark email as read",
+                            flagErr
+                          );
+                      });
                     }
+                    resolved = true;
+                    resolve(best.code);
                   } else {
-                    console.log(`❌ No code found in email`);
-                    if (!resolved) {
-                      resolved = true;
-                      resolve(null);
-                    }
+                    console.log(`❌ No valid code found in emails`);
+                    resolved = true;
+                    resolve(null);
                   }
                 }
               } catch (parseError) {
                 console.error("Error parsing email:", parseError);
-                if (!resolved) {
-                  resolved = true;
-                  resolve(null);
+                pendingCount--;
+                if (pendingCount === 0 && !resolved) {
+                  if (validEmails.length > 0) {
+                    validEmails.sort(
+                      (a, b) => b.date.getTime() - a.date.getTime()
+                    );
+                    const best = validEmails[0];
+                    if (best.uid) {
+                      this.imap.addFlags(best.uid, "\\Seen", (flagErr) => {
+                        if (flagErr)
+                          console.warn(
+                            "Warning: Could not mark email as read",
+                            flagErr
+                          );
+                      });
+                    }
+                    resolved = true;
+                    resolve(best.code);
+                  } else {
+                    resolved = true;
+                    resolve(null);
+                  }
                 }
               }
             });

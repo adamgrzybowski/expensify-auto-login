@@ -12,7 +12,7 @@ interface Config {
 
 // Strip +tag from email (e.g., user+tag@domain.com -> user@domain.com)
 function stripEmailTag(email: string): string {
-  return email.replace(/\+[^@]+@/, '@');
+  return email.replace(/\+[^@]+@/, "@");
 }
 
 export class AutoLogin {
@@ -40,6 +40,10 @@ export class AutoLogin {
       await this.webAutomation.init(this.config.headless, this.config.devtools);
       await this.webAutomation.navigateToLogin(this.config.loginUrl);
 
+      // Connect to email before login to be ready, and record timestamp before triggering email
+      await this.emailMonitor.connect();
+      const loginStartTime = new Date();
+
       const needsLogin = await this.webAutomation.enterEmail(this.config.email);
 
       if (!needsLogin) {
@@ -47,8 +51,11 @@ export class AutoLogin {
         return;
       }
 
-      await this.emailMonitor.connect();
-      const code = await this.emailMonitor.waitForCode(this.config.fromEmail, 60000);
+      const code = await this.emailMonitor.waitForCode(
+        this.config.fromEmail,
+        60000,
+        loginStartTime
+      );
       console.log("");
 
       await this.webAutomation.enterCode(code);
