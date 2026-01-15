@@ -14,6 +14,9 @@ test-results/
 playwright-report/
 playwright/.cache/
 
+# Browser data
+browser-data/
+
 # Logs
 *.log
 npm-debug.log*

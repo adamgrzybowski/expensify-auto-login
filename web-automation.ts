@@ -4,15 +4,20 @@ export class WebAutomation {
   private browser: Browser | null = null;
   private page: Page | null = null;
 
-  async init(headless: boolean = false): Promise<void> {
-    this.browser = await chromium.launch({
+  async init(headless: boolean = false, devtools: boolean = false): Promise<void> {
+    const args = ['--start-maximized'];
+    if (devtools) {
+      args.push('--auto-open-devtools-for-tabs');
+    }
+
+    this.browser = await chromium.launchPersistentContext('./browser-data', {
       headless,
-      slowMo: 100, // Slow down operations for better visibility
+      slowMo: 100,
+      viewport: null,
+      args,
     });
-    this.page = await this.browser.newPage();
-    
-    // Set a reasonable viewport
-    await this.page.setViewportSize({ width: 1280, height: 720 });
+
+    this.page = this.browser.pages()[0] || await this.browser.newPage();
   }
 
   async navigateToLogin(url: string): Promise<void> {

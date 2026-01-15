@@ -71,7 +71,7 @@ Add `APP_PASSWORD` to your `.env` file:
 
 ```bash
 # Copy the example file
-cp env.example .env
+cp .env.example .env
 
 # Edit .env and add your App Password
 APP_PASSWORD=your-16-char-app-password
@@ -108,7 +108,7 @@ You can set configuration in environment variables or a `.env` file:
 
 ```bash
 # Copy the example file
-cp env.example .env
+cp .env.example .env
 
 # Then edit .env with your values
 ```
@@ -130,6 +130,9 @@ FROM_EMAIL=noreply@expensify.com
 
 # Run browser in headless mode (true/false)
 HEADLESS=false
+
+# Open DevTools automatically (true/false)
+DEVTOOLS=false
 ```
 
 **Note:** The script checks for password in this order:

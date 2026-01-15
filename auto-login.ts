@@ -10,7 +10,13 @@ interface Config {
   loginUrl: string;
   fromEmail?: string; // Email sender (default: noreply@expensify.com)
   headless?: boolean; // Run browser in headless mode
+  devtools?: boolean; // Open DevTools automatically
   maxWaitTime?: number; // Max time to wait for email (ms)
+}
+
+// Strip +tag from email (e.g., user+tag@domain.com -> user@domain.com)
+function stripEmailTag(email: string): string {
+  return email.replace(/\+[^@]+@/, '@');
 }
 
 export class AutoLogin {
@@ -20,8 +26,10 @@ export class AutoLogin {
 
   constructor(config: Config) {
     this.config = config;
+    // Use email without +tag for IMAP connection
+    const imapEmail = stripEmailTag(config.email);
     this.emailMonitor = new EmailMonitor({
-      user: config.email,
+      user: imapEmail,
       password: config.emailPassword,
       host: "imap.gmail.com",
       port: 993,
@@ -36,7 +44,7 @@ export class AutoLogin {
 
       // 1. Initialize services
       await this.emailMonitor.connect();
-      await this.webAutomation.init(this.config.headless || false);
+      await this.webAutomation.init(this.config.headless || false, this.config.devtools || false);
 
       // 2. Navigate to login page
       await this.webAutomation.navigateToLogin(this.config.loginUrl);
@@ -158,6 +166,7 @@ async function main() {
     process.env.LOGIN_URL || "https://dev.new.expensify.com:8082/";
   const fromEmail = process.env.FROM_EMAIL || "noreply@expensify.com";
   const headless = process.env.HEADLESS === "true";
+  const devtools = process.env.DEVTOOLS === "true";
 
   // Get password securely (keychain or interactive prompt only)
   // Set USE_KEYCHAIN=false to skip keychain and use prompt only
@@ -170,6 +179,7 @@ async function main() {
     loginUrl,
     fromEmail,
     headless,
+    devtools,
     maxWaitTime: 60000, // 60 seconds
   };
 
