@@ -37,11 +37,17 @@ export class AutoLogin {
     try {
       console.log("Starting login...\n");
 
-      await this.emailMonitor.connect();
       await this.webAutomation.init(this.config.headless, this.config.devtools);
       await this.webAutomation.navigateToLogin(this.config.loginUrl);
-      await this.webAutomation.enterEmail(this.config.email);
 
+      const needsLogin = await this.webAutomation.enterEmail(this.config.email);
+
+      if (!needsLogin) {
+        console.log("\nAlready logged in!\n");
+        return;
+      }
+
+      await this.emailMonitor.connect();
       const code = await this.emailMonitor.waitForCode(this.config.fromEmail, 60000);
       console.log("");
 

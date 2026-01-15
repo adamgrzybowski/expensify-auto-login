@@ -30,9 +30,9 @@ export class WebAutomation {
    * Enters email and submits the form
    * Adjust selectors based on actual Expensify login page structure
    */
-  async enterEmail(email: string): Promise<void> {
+  async enterEmail(email: string): Promise<boolean> {
     if (!this.page) throw new Error('Browser not initialized');
-    
+
     // Wait for email input to be visible
     // Try multiple possible selectors
     const emailSelectors = [
@@ -54,6 +54,11 @@ export class WebAutomation {
     }
 
     if (!emailInput) {
+      const url = this.page.url();
+      if (!url.includes('/login') && !url.includes('/signin')) {
+        console.log('Already logged in, skipping login process');
+        return false;
+      }
       throw new Error('Could not find email input field');
     }
 
@@ -92,6 +97,7 @@ export class WebAutomation {
 
     // Wait a bit for the form to process
     await this.page.waitForTimeout(1000);
+    return true;
   }
 
   /**
