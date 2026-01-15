@@ -1,0 +1,20 @@
+{
+  "name": "expensify-auto-login",
+  "version": "1.0.0",
+  "description": "Automated login for Expensify using email code verification",
+  "type": "module",
+  "scripts": {
+    "start": "bun run auto-login.ts",
+    "login": "bun run auto-login.ts",
+    "verify-password": "bun run verify-app-password.ts"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.5",
+    "@types/imap": "^0.8.40"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0"
+  }
+}
